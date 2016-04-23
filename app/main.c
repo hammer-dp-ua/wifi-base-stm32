@@ -107,7 +107,7 @@ void TIMER3_Confing()
    NVIC_SetPriority(TIM3_IRQn, 0);
    TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
 
-   TIM_Cmd(TIM3, ENABLE);*/
+   TIM_Cmd(TIM3, ENABLE); */
 }
 
 void DMA_Config()
