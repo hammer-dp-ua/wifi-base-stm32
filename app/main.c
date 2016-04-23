@@ -7,8 +7,9 @@
 #define USART1_TDR_ADDRESS (uint32_t)(&(USART1->TDR))
 #define USART1_RDR_ADDRESS (uint32_t)(&(USART1->RDR))
 
-const char esp8226_request_version_id[] __attribute__ ((section(".text.const"))) = "AT+GMR";
-const char constant[] __attribute__ ((section(".text.const"))) = "123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456";
+char esp8226_request_get_visible_network_list[] __attribute__ ((section(".text.const"))) = "AT+CWLAP\r\n";
+char esp8226_request_get_version_id[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
+char constant[] __attribute__ ((section(".text.const"))) = "123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456";
 
 char usartDataToBeTransmitted[100];
 char usartDataReceived[100];
@@ -22,16 +23,25 @@ void SetFlag(uint8_t flag);
 void SesetFlag(uint8_t flag);
 void DMA_Config();
 void USART_Config();
-void SendUsartData(const char *string);
+void send_usard_data_from_constant(char string[]);
 
-void DMA1_Channel1_IRQHandler()
+void DMA1_Channel2_3_IRQHandler()
 {
-   DMA_ClearITPendingBit(DMA1_IT_TC1);
+   DMA_ClearITPendingBit(DMA1_IT_TC2);
 }
 
 void TIM3_IRQHandler()
 {
    TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+}
+
+void USART1_IRQHandler()
+{
+   //USART_ClearITPendingBit(USART1, USART_IT_TC);
+   if (USART_GetFlagStatus(USART1, USART_FLAG_TC) == SET)
+   {
+      usartDataReceived[99] = constant[1];
+   }
 }
 
 int main()
@@ -44,10 +54,30 @@ int main()
 
    while (1)
    {
-      volatile uint32_t cnt = 10000000;
+      volatile uint32_t cnt = 1600000;
       while (--cnt > 0);
 
-      SendUsartData(&esp8226_request_version_id[0]);
+      /*USART_ClearFlag(USART1, USART_FLAG_TC);
+      USART_SendData(USART1, 'A');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'T');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, '+');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'C');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'W');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'L');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'A');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, 'P');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
+      USART_SendData(USART1, '\r');
+      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);*/
+      send_usard_data_from_constant(esp8226_request_get_visible_network_list);
    }
 }
 
@@ -116,10 +146,10 @@ void DMA_Config()
 
    DMA_InitTypeDef dmaInitType;
    dmaInitType.DMA_PeripheralBaseAddr = USART1_TDR_ADDRESS;
-   dmaInitType.DMA_MemoryBaseAddr = (uint32_t)(&usartDataToBeTransmitted[0]);
+   //dmaInitType.DMA_MemoryBaseAddr = (uint32_t)(&usartDataToBeTransmitted);
    dmaInitType.DMA_DIR = DMA_DIR_PeripheralDST; // Specifies if the peripheral is the source or destination
    dmaInitType.DMA_BufferSize = 0;
-   dmaInitType.DMA_PeripheralInc = DMA_PeripheralInc_Enable;
+   dmaInitType.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
    dmaInitType.DMA_MemoryInc = DMA_MemoryInc_Enable; // DMA_MemoryInc_Enable if DMA_InitTypeDef.DMA_BufferSize > 1
    dmaInitType.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
    dmaInitType.DMA_MemoryDataSize = DMA_PeripheralDataSize_Byte;
@@ -165,17 +195,20 @@ void ResetFlag(uint8_t flag)
    generalFlags &= ~(generalFlags & flag);
 }
 
-void SendUsartData(const char *string)
+void send_usard_data_from_constant(char string[])
 {
    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
+   uint32_t first_element_address = (uint32_t)string;
 
-   unsigned int i;
-   for (i = 0; *string != '\0'; string++)
+   unsigned int bytes_to_send;
+   for (bytes_to_send = 0; *string != '\0'; string++, bytes_to_send++)
+   {}
+
+   if (bytes_to_send > 0)
    {
-      usartDataToBeTransmitted[i] = *string;
+      DMA_SetCurrDataCounter(USART1_TX_DMA_CHANNEL, bytes_to_send);
+      USART1_TX_DMA_CHANNEL->CMAR = first_element_address;
+      USART_ClearFlag(USART1, USART_FLAG_TC);
+      DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
    }
-
-   USART1_TX_DMA_CHANNEL->CNDTR = i;
-   USART_ClearFlag(USART1, USART_FLAG_TC);
-   DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
 }

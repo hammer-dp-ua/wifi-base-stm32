@@ -412,7 +412,7 @@ void DMA_Cmd(DMA_Channel_TypeDef* DMAy_Channelx, FunctionalState NewState)
   * @note   This function can only be used when the DMAy_Channelx is disabled.
   * @retval None.
   */
-/*void DMA_SetCurrDataCounter(DMA_Channel_TypeDef* DMAy_Channelx, uint16_t DataNumber)
+void DMA_SetCurrDataCounter(DMA_Channel_TypeDef* DMAy_Channelx, uint16_t DataNumber)
 {
   // Check the parameters 
   assert_param(IS_DMA_ALL_PERIPH(DMAy_Channelx));
@@ -420,7 +420,7 @@ void DMA_Cmd(DMA_Channel_TypeDef* DMAy_Channelx, FunctionalState NewState)
 //--------------------------- DMAy Channelx CNDTR Configuration --------------
   // Write to DMAy Channelx CNDTR 
   DMAy_Channelx->CNDTR = DataNumber;
-}*/
+}
 
 /**
   * @brief  Returns the number of remaining data units in the current
