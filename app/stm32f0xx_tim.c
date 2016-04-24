@@ -384,14 +384,14 @@ void TIM_TimeBaseInit(TIM_TypeDef* TIMx, TIM_TimeBaseInitTypeDef* TIM_TimeBaseIn
   * @param  Counter: specifies the Counter register new value.
   * @retval None
   */
-/*void TIM_SetCounter(TIM_TypeDef* TIMx, uint32_t Counter)
+void TIM_SetCounter(TIM_TypeDef* TIMx, uint32_t Counter)
 {
   // Check the parameters
    assert_param(IS_TIM_ALL_PERIPH(TIMx));
    
   // Set the Counter Register value
   TIMx->CNT = Counter;
-}*/
+}
 
 /**
   * @brief  Sets the TIMx Autoreload Register value
@@ -597,7 +597,7 @@ void TIM_TimeBaseInit(TIM_TypeDef* TIMx, TIM_TimeBaseInitTypeDef* TIM_TimeBaseIn
   *          This parameter can be: ENABLE or DISABLE.
   * @retval None
   */
-/*void TIM_Cmd(TIM_TypeDef* TIMx, FunctionalState NewState)
+void TIM_Cmd(TIM_TypeDef* TIMx, FunctionalState NewState)
 {
   // Check the parameters
   assert_param(IS_TIM_ALL_PERIPH(TIMx)); 
@@ -613,7 +613,7 @@ void TIM_TimeBaseInit(TIM_TypeDef* TIMx, TIM_TimeBaseInitTypeDef* TIM_TimeBaseIn
     // Disable the TIM Counter
     TIMx->CR1 &= (uint16_t)(~((uint16_t)TIM_CR1_CEN));
   }
-}*/
+}
 
 /**
   * @}
@@ -2353,7 +2353,7 @@ void TIM_TimeBaseInit(TIM_TypeDef* TIMx, TIM_TimeBaseInitTypeDef* TIM_TimeBaseIn
   *          This parameter can be: ENABLE or DISABLE.
   * @retval None
   */
-/*void TIM_ITConfig(TIM_TypeDef* TIMx, uint16_t TIM_IT, FunctionalState NewState)
+void TIM_ITConfig(TIM_TypeDef* TIMx, uint16_t TIM_IT, FunctionalState NewState)
 {  
   // Check the parameters 
   assert_param(IS_TIM_ALL_PERIPH(TIMx));
@@ -2370,7 +2370,7 @@ void TIM_TimeBaseInit(TIM_TypeDef* TIMx, TIM_TimeBaseInitTypeDef* TIM_TimeBaseIn
     // Disable the Interrupt sources 
     TIMx->DIER &= (uint16_t)~TIM_IT;
   }
-}*/
+}
 
 /**
   * @brief  Configures the TIMx event to be generate by software.

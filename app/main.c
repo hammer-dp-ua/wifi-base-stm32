@@ -1,88 +1,92 @@
+/**
+ * unsigned char  uint8_t
+ * unsigned short uint16_t
+ * unsigned int   uint32_t
+ */
 #include "stm32f0xx.h"
-#include "arm_math.h"
+//#include "arm_math.h"
+
+#define CLOCK_SPEED 16000000
+#define USART_BAUD_RATE 115200
 
 #define USART1_TX_DMA_CHANNEL DMA1_Channel2
-#define USART1_RX_DMA_CHANNEL DMA1_Channel3
+#define USART1_TDR_ADDRESS (unsigned int)(&(USART1->TDR))
 
-#define USART1_TDR_ADDRESS (uint32_t)(&(USART1->TDR))
-#define USART1_RDR_ADDRESS (uint32_t)(&(USART1->RDR))
+#define USART_DATA_RECEIVED_FLAG 1
+#define GET_VISIBLE_NETWORK_LIST_REQUEST_SENT_FLAG 2
 
-char esp8226_request_get_visible_network_list[] __attribute__ ((section(".text.const"))) = "AT+CWLAP\r\n";
-char esp8226_request_get_version_id[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
-char constant[] __attribute__ ((section(".text.const"))) = "123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456123456";
+char USART_OK[] __attribute__ ((section(".text.const"))) = "OK";
+char ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST[] __attribute__ ((section(".text.const"))) = "AT+CWLAP\r\n";
+char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
 
-char usartDataToBeTransmitted[100];
-char usartDataReceived[100];
+volatile char usart_data_to_be_transmitted[100];
+volatile char usart_data_received[100];
+volatile unsigned char usart_received_bytes;
+volatile unsigned char overrun_errors;
 
-uint8_t generalFlags;
+volatile unsigned char general_flags;
 
 void Clock_Config();
 void Pins_Config();
 void TIMER3_Confing();
-void SetFlag(uint8_t flag);
-void SesetFlag(uint8_t flag);
+void set_flag(unsigned char flag);
+void reset_flag(unsigned char flag);
+unsigned char read_flag_state(unsigned char flag);
 void DMA_Config();
 void USART_Config();
 void send_usard_data_from_constant(char string[]);
 
-void DMA1_Channel2_3_IRQHandler()
-{
+void DMA1_Channel2_3_IRQHandler() {
    DMA_ClearITPendingBit(DMA1_IT_TC2);
 }
 
-void TIM3_IRQHandler()
-{
+void TIM3_IRQHandler() {
    TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
-}
 
-void USART1_IRQHandler()
-{
-   //USART_ClearITPendingBit(USART1, USART_IT_TC);
-   if (USART_GetFlagStatus(USART1, USART_FLAG_TC) == SET)
-   {
-      usartDataReceived[99] = constant[1];
+   if (usart_received_bytes > 0) {
+      usart_received_bytes = 0;
+      set_flag(USART_DATA_RECEIVED_FLAG);
    }
 }
 
-int main()
-{
+void USART1_IRQHandler() {
+   if (USART_GetFlagStatus(USART1, USART_FLAG_RXNE) == SET) {
+      TIM_SetCounter(TIM3, 0);
+      usart_data_received[usart_received_bytes] = USART_ReceiveData(USART1);
+      usart_received_bytes++;
+   } else if (USART_GetFlagStatus(USART1, USART_FLAG_ORE)) {
+      USART_ClearITPendingBit(USART1, USART_IT_ORE);
+      USART_ClearFlag(USART1, USART_FLAG_ORE);
+      overrun_errors++;
+   }
+}
+
+int main() {
    Clock_Config();
    Pins_Config();
    DMA_Config();
    USART_Config();
    //TIMER3_Confing();
 
-   while (1)
-   {
-      volatile uint32_t cnt = 1600000;
+   send_usard_data_from_constant(ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST);
+   set_flag(GET_VISIBLE_NETWORK_LIST_REQUEST_SENT_FLAG);
+
+   while (1) {
+      volatile unsigned int cnt = 3200000;
       while (--cnt > 0);
 
-      /*USART_ClearFlag(USART1, USART_FLAG_TC);
-      USART_SendData(USART1, 'A');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'T');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, '+');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'C');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'W');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'L');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'A');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, 'P');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
-      USART_SendData(USART1, '\r');
-      while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);*/
-      send_usard_data_from_constant(esp8226_request_get_visible_network_list);
+      if (read_flag_state(USART_DATA_RECEIVED_FLAG)) {
+         reset_flag(USART_DATA_RECEIVED_FLAG);
+
+         if (read_flag_state(GET_VISIBLE_NETWORK_LIST_REQUEST_SENT_FLAG))
+         {
+            reset_flag(GET_VISIBLE_NETWORK_LIST_REQUEST_SENT_FLAG);
+         }
+      }
    }
 }
 
-void Clock_Config()
-{
+void Clock_Config() {
    RCC_SYSCLKConfig(RCC_SYSCLKSource_HSI);
    RCC_PLLCmd(DISABLE);
    while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == SET);
@@ -93,8 +97,7 @@ void Clock_Config()
    RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);
 }
 
-void Pins_Config()
-{
+void Pins_Config() {
    // Connect BOOT0 to ground
 
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA | RCC_AHBPeriph_GPIOB, ENABLE);
@@ -122,26 +125,28 @@ void Pins_Config()
    GPIO_Init(GPIOB, &gpioInitType);
 }
 
-void TIMER3_Confing()
-{
+/**
+ * USART frame time Tfr = (1 / USART_BAUD_RATE) * 10bits
+ * Timer time to be sure the frame is ended Tt = Tfr + 0.5Tfr
+ * Frequency = 16Mhz, USART_BAUD_RATE = 115200. Tt = 0.13ms
+ */
+void TIMER3_Confing() {
    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
 
    TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
-   TIM_TimeBaseStructure.TIM_Period = 0xFFFF; // 100
-   TIM_TimeBaseStructure.TIM_Prescaler = 0; // 60000. 48MHz / 16 / 60000 * 2. The counter clock frequency CK_CNT is equal to fCK_PSC/ (PSC[15:0] + 1).
+   TIM_TimeBaseStructure.TIM_Period = CLOCK_SPEED * 15 / USART_BAUD_RATE;
+   TIM_TimeBaseStructure.TIM_Prescaler = 0;
    TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
    TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
    TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
 
-   /*NVIC_EnableIRQ(TIM3_IRQn);
-   NVIC_SetPriority(TIM3_IRQn, 0);
+   NVIC_EnableIRQ(TIM3_IRQn);
    TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
 
-   TIM_Cmd(TIM3, ENABLE); */
+   TIM_Cmd(TIM3, ENABLE);
 }
 
-void DMA_Config()
-{
+void DMA_Config() {
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1 , ENABLE);
 
    DMA_InitTypeDef dmaInitType;
@@ -159,53 +164,55 @@ void DMA_Config()
    DMA_Init(USART1_TX_DMA_CHANNEL, &dmaInitType);
 
    DMA_ITConfig(USART1_TX_DMA_CHANNEL, DMA_IT_TC, ENABLE);
-   NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+   NVIC_EnableIRQ(USART1_IRQn);
 
    DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
 }
 
-void USART_Config()
-{
+void USART_Config() {
    RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1, ENABLE);
 
    USART_OverSampling8Cmd(USART1, DISABLE);
 
    USART_InitTypeDef USART_InitStructure;
-   USART_InitStructure.USART_BaudRate = 115200;
+   USART_InitStructure.USART_BaudRate = USART_BAUD_RATE;
    USART_InitStructure.USART_WordLength = USART_WordLength_8b;
    USART_InitStructure.USART_StopBits = USART_StopBits_1;
    USART_InitStructure.USART_Parity = USART_Parity_No;
    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-   USART_InitStructure.USART_Mode = USART_Mode_Tx; // USART_Mode_Rx | USART_Mode_Tx;
+   USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
    USART_Init(USART1, &USART_InitStructure);
 
-   //USART_ITConfig(USART1, USART_IT_TC, ENABLE);
+   USART_ITConfig(USART1, USART_IT_RXNE, ENABLE);
+   USART_ITConfig(USART1, USART_IT_ERR, ENABLE);
+   NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+
    USART_DMACmd(USART1, USART_DMAReq_Tx, ENABLE);
 
    USART_Cmd(USART1, ENABLE);
 }
 
-void SetFlag(uint8_t flag)
-{
-   generalFlags |= flag;
+void set_flag(unsigned char flag) {
+   general_flags |= flag;
 }
 
-void ResetFlag(uint8_t flag)
-{
-   generalFlags &= ~(generalFlags & flag);
+void reset_flag(unsigned char flag) {
+   general_flags &= ~(general_flags & flag);
 }
 
-void send_usard_data_from_constant(char string[])
-{
+unsigned char read_flag_state(unsigned char flag) {
+   return general_flags & flag;
+}
+
+void send_usard_data_from_constant(char string[]) {
    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
-   uint32_t first_element_address = (uint32_t)string;
+   unsigned int first_element_address = (unsigned int) string;
 
    unsigned int bytes_to_send;
    for (bytes_to_send = 0; *string != '\0'; string++, bytes_to_send++)
    {}
 
-   if (bytes_to_send > 0)
-   {
+   if (bytes_to_send > 0) {
       DMA_SetCurrDataCounter(USART1_TX_DMA_CHANNEL, bytes_to_send);
       USART1_TX_DMA_CHANNEL->CMAR = first_element_address;
       USART_ClearFlag(USART1, USART_FLAG_TC);
