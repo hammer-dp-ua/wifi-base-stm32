@@ -16,19 +16,25 @@
 
 #define GET_VISIBLE_NETWORK_LIST_FLAG 1
 #define DISABLE_ECHO_FLAG 2
+#define CONNECT_TO_NETWORK_FLAG 4
 
-volatile unsigned int sent_flag;
-volatile unsigned int successfully_received_flags;
-volatile unsigned int general_flags;
+#define USART_DATA_RECEIVED_BUFFER_SIZE 100
+
+unsigned int sent_flag;
+unsigned int successfully_received_flags;
+unsigned int general_flags;
 
 char USART_OK[] __attribute__ ((section(".text.const"))) = "OK";
-char ESP8226_REQUEST_DISABLE_ECHO[] __attribute__ ((section(".text.const"))) = "ATE0";
+char DEFAULT_ACCESS_POINT_NAME[] __attribute__ ((section(".text.const"))) = "Asus";
+char DEFAULT_ACCESS_POINT_PASSWORD[] __attribute__ ((section(".text.const"))) = "";
+char ESP8226_REQUEST_DISABLE_ECHO[] __attribute__ ((section(".text.const"))) = "ATE0\r\n";
 char ESP8226_RESPONSE_BUSY[] __attribute__ ((section(".text.const"))) = "busy";
 char ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST[] __attribute__ ((section(".text.const"))) = "AT+CWLAP\r\n";
+char ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE[] __attribute__ ((section(".text.const"))) = "AT+CWJAP_DEF=\"{1}\",\"{2}\"\r\n";
 char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
 
-volatile char usart_data_to_be_transmitted[100];
-volatile char usart_data_received[100];
+volatile char usart_data_to_be_transmitted_buffer[100];
+char usart_data_received_buffer[USART_DATA_RECEIVED_BUFFER_SIZE];
 volatile unsigned char usart_received_bytes;
 volatile unsigned char overrun_errors;
 
@@ -43,8 +49,12 @@ void USART_Config();
 void set_appropriate_successfully_recieved_flag();
 void disable_echo();
 void get_network_list();
+void connect_to_network(char ssid[], char password[]);
 void send_usard_data_from_constant(char string[]);
-unsigned char is_usart_response_contains(unsigned int data_to_be_contained[], unsigned char elements_count);
+unsigned char is_usart_response_contains_elements(char *data_to_be_contained[], unsigned char elements_count);
+unsigned char is_usart_response_contains_element(char string_to_be_contained[]);
+unsigned char contains_string(char being_compared_string[], char string_to_be_contained[]);
+void clear_usart_data_received_buffer();
 
 void DMA1_Channel2_3_IRQHandler() {
    DMA_ClearITPendingBit(DMA1_IT_TC2);
@@ -62,7 +72,7 @@ void TIM3_IRQHandler() {
 void USART1_IRQHandler() {
    if (USART_GetFlagStatus(USART1, USART_FLAG_RXNE) == SET) {
       TIM_SetCounter(TIM3, 0);
-      usart_data_received[usart_received_bytes] = USART_ReceiveData(USART1);
+      usart_data_received_buffer[usart_received_bytes] = USART_ReceiveData(USART1);
       usart_received_bytes++;
    } else if (USART_GetFlagStatus(USART1, USART_FLAG_ORE)) {
       USART_ClearITPendingBit(USART1, USART_IT_ORE);
@@ -81,13 +91,21 @@ int main() {
    disable_echo();
 
    while (1) {
-      volatile unsigned int cnt = 3200000;
-      while (--cnt > 0);
-
       if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
-         set_appropriate_successfully_recieved_flag();
          reset_flag(&general_flags, USART_DATA_RECEIVED_FLAG);
+         set_appropriate_successfully_recieved_flag();
       }
+
+      if (read_flag_state(&successfully_received_flags, DISABLE_ECHO_FLAG)) {
+         reset_flag(&successfully_received_flags, DISABLE_ECHO_FLAG);
+
+         get_network_list();
+      }
+      if (read_flag_state(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG)) {
+         connect_to_network(DEFAULT_ACCESS_POINT_NAME, DEFAULT_ACCESS_POINT_PASSWORD);
+      }
+
+      char *pointer = (char*)malloc(50);
    }
 }
 
@@ -95,16 +113,31 @@ void set_appropriate_successfully_recieved_flag() {
    if (read_flag_state(&sent_flag, DISABLE_ECHO_FLAG)) {
       reset_flag(&sent_flag, DISABLE_ECHO_FLAG);
 
-      unsigned int data_to_be_contained[2] = {&ESP8226_REQUEST_DISABLE_ECHO, &USART_OK};
-      if (is_usart_response_contains(data_to_be_contained, 2)) {
+      if (is_usart_response_contains_element(USART_OK)) {
          set_flag(&successfully_received_flags, DISABLE_ECHO_FLAG);
+      }
+   }
+   if (read_flag_state(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG)) {
+      reset_flag(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
+
+      if (is_usart_response_contains_element(DEFAULT_ACCESS_POINT_NAME)) {
+         set_flag(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG);
       }
    }
 }
 
-unsigned char is_usart_response_contains(unsigned int data_to_be_contained[], unsigned char elements_count) {
-   for (unsigned char elements_index = 0; elements_index < elements_count; elements_index++, data_to_be_contained++) {
-      if (!string_contains(&usart_data_received, data_to_be_contained)) {
+unsigned char is_usart_response_contains_element(char string_to_be_contained[]) {
+   if (contains_string(usart_data_received_buffer, string_to_be_contained)) {
+      return 1;
+   } else {
+      return 0;
+   }
+}
+
+//char *data_to_be_contained[] = {ESP8226_REQUEST_DISABLE_ECHO, USART_OK};
+unsigned char is_usart_response_contains_elements(char *data_to_be_contained[], unsigned char elements_count) {
+   for (unsigned char elements_index = 0; elements_index < elements_count; elements_index++) {
+      if (!contains_string(usart_data_received_buffer, data_to_be_contained[elements_index])) {
          return 0;
       }
    }
@@ -118,12 +151,10 @@ unsigned char contains_string(char being_compared_string[], char string_to_be_co
       return found;
    }
 
-   unsigned int string_to_be_contained_first_char_address = string_to_be_contained;
-
    for (; *being_compared_string != '\0'; being_compared_string++) {
       unsigned char all_chars_are_equal = 1;
 
-      for (unsigned int char_address = string_to_be_contained_first_char_address; *char_address != '\0';
+      for (char *char_address = string_to_be_contained; *char_address != '\0';
             char_address++, being_compared_string++) {
          if (*being_compared_string == '\0') {
             return found;
@@ -152,6 +183,11 @@ void disable_echo() {
 void get_network_list() {
    send_usard_data_from_constant(ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST);
    set_flag(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
+}
+
+void connect_to_network(char ssid[], char password[]) {
+   send_usard_data_from_constant(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE);
+   set_flag(&sent_flag, CONNECT_TO_NETWORK_FLAG);
 }
 
 void Clock_Config() {
@@ -272,7 +308,9 @@ unsigned char read_flag_state(unsigned int *flags, unsigned int flag_value) {
    return *flags & flag_value;
 }
 
-void send_usard_data_from_constant(char string[]) {
+void send_usard_data_from_constant(char *string) {
+   clear_usart_data_received_buffer();
+
    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
    unsigned int first_element_address = (unsigned int) string;
 
@@ -285,5 +323,15 @@ void send_usard_data_from_constant(char string[]) {
       USART1_TX_DMA_CHANNEL->CMAR = first_element_address;
       USART_ClearFlag(USART1, USART_FLAG_TC);
       DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
+   }
+}
+
+void clear_usart_data_received_buffer() {
+   for (int i = 0; i < USART_DATA_RECEIVED_BUFFER_SIZE; i++) {
+      if (usart_data_received_buffer[i] == '\0') {
+         break;
+      }
+
+      usart_data_received_buffer[i] = '\0';
    }
 }
