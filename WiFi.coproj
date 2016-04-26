@@ -92,12 +92,12 @@
     <File name="components/arm_math.h" path="components/arm_math.h" type="1"/>
     <File name="stm32f0xx_pwr.c" path="app/stm32f0xx_pwr.c" type="1"/>
     <File name="components/core_cm0.h" path="components/core_cm0.h" type="1"/>
-    <File name="stm32f0xx_rcc.c" path="app/stm32f0xx_rcc.c" type="1"/>
     <File name="stm32f0xx_conf.h" path="app/stm32f0xx_conf.h" type="1"/>
-    <File name="components/stm32f0xx_rcc.h" path="components/stm32f0xx_rcc.h" type="1"/>
+    <File name="stm32f0xx_rcc.c" path="app/stm32f0xx_rcc.c" type="1"/>
     <File name="stm32f0xx_spi.c" path="app/stm32f0xx_spi.c" type="1"/>
-    <File name="system_stm32f0xx.c" path="app/system_stm32f0xx.c" type="1"/>
+    <File name="components/stm32f0xx_rcc.h" path="components/stm32f0xx_rcc.h" type="1"/>
     <File name="components/stm32f0xx_tim.h" path="components/stm32f0xx_tim.h" type="1"/>
+    <File name="system_stm32f0xx.c" path="app/system_stm32f0xx.c" type="1"/>
     <File name="components/stm32f0xx_syscfg.h" path="components/stm32f0xx_syscfg.h" type="1"/>
     <File name="stm32f0xx_dma.c" path="app/stm32f0xx_dma.c" type="1"/>
     <File name="components" path="" type="2"/>
