@@ -31,7 +31,11 @@
         <Option name="LTO" value="0"/>
         <Option name="IsNewStartupCode" value="1"/>
         <Option name="Library" value="Use base C Library"/>
-        <LinkedLibraries/>
+        <Option name="Printf" value="0"/>
+        <Option name="Scanf" value="0"/>
+        <LinkedLibraries>
+          <Libset dir="c:\gcc-arm-none-eabi-4_9\arm-none-eabi\lib\thumb\" libs="nosys"/>
+        </LinkedLibraries>
         <MemoryAreas debugInFlashNotRAM="1">
           <Memory name="IROM1" type="ReadOnly" size="0x00010000" startValue="0x08000000"/>
           <Memory name="IRAM1" type="ReadWrite" size="0x00002000" startValue="0x20000000"/>
@@ -62,7 +66,7 @@
       <Option name="org.coocox.codebugger.gdbjtag.core.targetEndianess" value="0"/>
       <Option name="org.coocox.codebugger.gdbjtag.core.jlinkResetMode" value="Type 0: Normal"/>
       <Option name="org.coocox.codebugger.gdbjtag.core.resetMode" value="HW RESET"/>
-      <Option name="org.coocox.codebugger.gdbjtag.core.ifSemihost" value="0"/>
+      <Option name="org.coocox.codebugger.gdbjtag.core.ifSemihost" value="1"/>
       <Option name="org.coocox.codebugger.gdbjtag.core.ifCacheRom" value="0"/>
       <Option name="org.coocox.codebugger.gdbjtag.core.ipAddress" value="127.0.0.1"/>
       <Option name="org.coocox.codebugger.gdbjtag.core.portNumber" value="2009"/>
@@ -92,12 +96,12 @@
     <File name="components/arm_math.h" path="components/arm_math.h" type="1"/>
     <File name="stm32f0xx_pwr.c" path="app/stm32f0xx_pwr.c" type="1"/>
     <File name="components/core_cm0.h" path="components/core_cm0.h" type="1"/>
-    <File name="stm32f0xx_conf.h" path="app/stm32f0xx_conf.h" type="1"/>
     <File name="stm32f0xx_rcc.c" path="app/stm32f0xx_rcc.c" type="1"/>
-    <File name="stm32f0xx_spi.c" path="app/stm32f0xx_spi.c" type="1"/>
+    <File name="stm32f0xx_conf.h" path="app/stm32f0xx_conf.h" type="1"/>
     <File name="components/stm32f0xx_rcc.h" path="components/stm32f0xx_rcc.h" type="1"/>
-    <File name="components/stm32f0xx_tim.h" path="components/stm32f0xx_tim.h" type="1"/>
+    <File name="stm32f0xx_spi.c" path="app/stm32f0xx_spi.c" type="1"/>
     <File name="system_stm32f0xx.c" path="app/system_stm32f0xx.c" type="1"/>
+    <File name="components/stm32f0xx_tim.h" path="components/stm32f0xx_tim.h" type="1"/>
     <File name="components/stm32f0xx_syscfg.h" path="components/stm32f0xx_syscfg.h" type="1"/>
     <File name="stm32f0xx_dma.c" path="app/stm32f0xx_dma.c" type="1"/>
     <File name="components" path="" type="2"/>

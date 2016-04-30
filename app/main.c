@@ -5,6 +5,7 @@
  */
 #include "stm32f0xx.h"
 //#include "arm_math.h"
+#include "stdlib.h"
 
 #define CLOCK_SPEED 16000000
 #define USART_BAUD_RATE 115200
@@ -33,7 +34,7 @@ char ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST[] __attribute__ ((section(".text.c
 char ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE[] __attribute__ ((section(".text.const"))) = "AT+CWJAP_DEF=\"{1}\",\"{2}\"\r\n";
 char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
 
-volatile char usart_data_to_be_transmitted_buffer[100];
+char *usart_data_to_be_transmitted_buffer;
 char usart_data_received_buffer[USART_DATA_RECEIVED_BUFFER_SIZE];
 volatile unsigned char usart_received_bytes;
 volatile unsigned char overrun_errors;
@@ -51,10 +52,13 @@ void disable_echo();
 void get_network_list();
 void connect_to_network(char ssid[], char password[]);
 void send_usard_data_from_constant(char string[]);
+void send_usard_data_from_buffer();
 unsigned char is_usart_response_contains_elements(char *data_to_be_contained[], unsigned char elements_count);
 unsigned char is_usart_response_contains_element(char string_to_be_contained[]);
 unsigned char contains_string(char being_compared_string[], char string_to_be_contained[]);
 void clear_usart_data_received_buffer();
+void *set_string_parameters(char string[], char *parameters[]);
+unsigned short get_string_length(char string[]);
 
 void DMA1_Channel2_3_IRQHandler() {
    DMA_ClearITPendingBit(DMA1_IT_TC2);
@@ -86,12 +90,15 @@ int main() {
    Pins_Config();
    DMA_Config();
    USART_Config();
-   TIMER3_Confing();
+   //TIMER3_Confing();
 
-   disable_echo();
+   //disable_echo();
+   char *parameters[] = {"Asus", "shmasus", NULL};
+   usart_data_to_be_transmitted_buffer = set_string_parameters(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE, parameters);
 
    while (1) {
-      if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
+      usart_data_to_be_transmitted_buffer++;
+      /*if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
          reset_flag(&general_flags, USART_DATA_RECEIVED_FLAG);
          set_appropriate_successfully_recieved_flag();
       }
@@ -103,9 +110,8 @@ int main() {
       }
       if (read_flag_state(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG)) {
          connect_to_network(DEFAULT_ACCESS_POINT_NAME, DEFAULT_ACCESS_POINT_PASSWORD);
-      }
-
-      char *pointer = (char*)malloc(50);
+      }*/
+      usart_data_to_be_transmitted_buffer--;
    }
 }
 
@@ -324,6 +330,57 @@ void send_usard_data_from_constant(char *string) {
       USART_ClearFlag(USART1, USART_FLAG_TC);
       DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
    }
+}
+
+void send_usard_data_from_buffer() {
+
+}
+
+void *set_string_parameters(char string[], char *parameters[]) {
+   unsigned char open_brace_found = 0;
+   unsigned short string_length = 0;
+
+   for (char *string_pointer = string; *string_pointer != '\0'; string_pointer++) {
+      if (*string_pointer == '{') {
+         if (open_brace_found) {
+            return NULL;
+         }
+         open_brace_found = 1;
+         continue;
+      }
+      if (*string_pointer == '}') {
+         if (!open_brace_found) {
+            return NULL;
+         }
+         open_brace_found = 0;
+         continue;
+      }
+      if (open_brace_found) {
+         continue;
+      }
+
+      string_length++;
+   }
+
+   for (unsigned char i = 0; parameters[i] != NULL; i++) {
+      string_length += get_string_length(parameters[i]);
+   }
+
+   // 1 is for the last \0 character
+   char *a;
+   a = malloc(string_length + 1); // (string_length + 1) * sizeof(char)
+   for (unsigned char i = 0; i < string_length + 1; i++) {
+      *(a + i) = 0;
+   }
+   return a;
+}
+
+unsigned short get_string_length(char string[]) {
+   unsigned short length = 0;
+
+   for (char *string_pointer = string; *string_pointer != '\0'; string_pointer++, length++) {
+   }
+   return length;
 }
 
 void clear_usart_data_received_buffer() {
