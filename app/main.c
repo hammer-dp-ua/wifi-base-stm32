@@ -336,10 +336,18 @@ void send_usard_data_from_buffer() {
 
 }
 
+/**
+ * Supports only 9 parameters (1 - 9)
+ */
 void *set_string_parameters(char string[], char *parameters[]) {
    unsigned char open_brace_found = 0;
-   unsigned short string_length = 0;
+   unsigned char parameters_length = 0;
+   unsigned short result_string_length = 0;
 
+   for (; parameters[parameters_length] != NULL; parameters_length++) {
+   }
+
+   // Calculate the length without symbols to be replaced ('{x}')
    for (char *string_pointer = string; *string_pointer != '\0'; string_pointer++) {
       if (*string_pointer == '{') {
          if (open_brace_found) {
@@ -359,19 +367,55 @@ void *set_string_parameters(char string[], char *parameters[]) {
          continue;
       }
 
-      string_length++;
+      result_string_length++;
+   }
+
+   if (open_brace_found) {
+      return NULL;
    }
 
    for (unsigned char i = 0; parameters[i] != NULL; i++) {
-      string_length += get_string_length(parameters[i]);
+      result_string_length += get_string_length(parameters[i]);
+   }
+   // 1 is for the last \0 character
+   result_string_length++;
+
+   char *a;
+   a = malloc(result_string_length); // (string_length + 1) * sizeof(char)
+
+   if (a == NULL) {
+      return NULL;
    }
 
-   // 1 is for the last \0 character
-   char *a;
-   a = malloc(string_length + 1); // (string_length + 1) * sizeof(char)
-   for (unsigned char i = 0; i < string_length + 1; i++) {
-      *(a + i) = 0;
+   unsigned char result_string_index = 0, input_string_index = 0;
+   for (; result_string_index < result_string_length - 1; result_string_index++) {
+      char input_string_symbol = string[input_string_index];
+
+      if (input_string_symbol == '{') {
+         input_string_index++;
+         input_string_symbol = string[input_string_index] ;
+
+         if (input_string_symbol < '1' || input_string_symbol > '9') {
+            return NULL;
+         }
+
+         input_string_symbol -= 48; // Now it's not a char character, but a number
+         if (input_string_symbol > parameters_length) {
+            return NULL;
+         }
+         input_string_index += 2;
+
+         // Parameters are starting with 1
+         for (char *parameter = parameters[input_string_symbol - 1]; *parameter != '\0'; parameter++, result_string_index++) {
+            *(a + result_string_index) = *parameter;
+         }
+         result_string_index--;
+      } else {
+         *(a + result_string_index) = string[input_string_index];
+         input_string_index++;
+      }
    }
+   *(a + result_string_length) = '\n';
    return a;
 }
 
