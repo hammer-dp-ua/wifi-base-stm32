@@ -34,7 +34,7 @@ char ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST[] __attribute__ ((section(".text.c
 char ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE[] __attribute__ ((section(".text.const"))) = "AT+CWJAP_DEF=\"{1}\",\"{2}\"\r\n";
 char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
 
-char *usart_data_to_be_transmitted_buffer;
+char *usart_data_to_be_transmitted_buffer = NULL;
 char usart_data_received_buffer[USART_DATA_RECEIVED_BUFFER_SIZE];
 volatile unsigned char usart_received_bytes;
 volatile unsigned char overrun_errors;
@@ -51,8 +51,7 @@ void set_appropriate_successfully_recieved_flag();
 void disable_echo();
 void get_network_list();
 void connect_to_network(char ssid[], char password[]);
-void send_usard_data_from_constant(char string[]);
-void send_usard_data_from_buffer();
+void send_usard_data(char string[]);
 unsigned char is_usart_response_contains_elements(char *data_to_be_contained[], unsigned char elements_count);
 unsigned char is_usart_response_contains_element(char string_to_be_contained[]);
 unsigned char contains_string(char being_compared_string[], char string_to_be_contained[]);
@@ -90,16 +89,19 @@ int main() {
    Pins_Config();
    DMA_Config();
    USART_Config();
-   //TIMER3_Confing();
+   TIMER3_Confing();
 
-   //disable_echo();
-   char *parameters[] = {"Asus", "shmasus", NULL};
-   usart_data_to_be_transmitted_buffer = set_string_parameters(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE, parameters);
+   disable_echo();
 
    while (1) {
-      usart_data_to_be_transmitted_buffer++;
-      /*if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
+      if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
          reset_flag(&general_flags, USART_DATA_RECEIVED_FLAG);
+
+         if (usart_data_to_be_transmitted_buffer != NULL) {
+            free(usart_data_to_be_transmitted_buffer);
+            usart_data_to_be_transmitted_buffer = NULL;
+         }
+
          set_appropriate_successfully_recieved_flag();
       }
 
@@ -110,8 +112,7 @@ int main() {
       }
       if (read_flag_state(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG)) {
          connect_to_network(DEFAULT_ACCESS_POINT_NAME, DEFAULT_ACCESS_POINT_PASSWORD);
-      }*/
-      usart_data_to_be_transmitted_buffer--;
+      }
    }
 }
 
@@ -182,17 +183,19 @@ unsigned char contains_string(char being_compared_string[], char string_to_be_co
 }
 
 void disable_echo() {
-   send_usard_data_from_constant(ESP8226_REQUEST_DISABLE_ECHO);
+   send_usard_data(ESP8226_REQUEST_DISABLE_ECHO);
    set_flag(&sent_flag, DISABLE_ECHO_FLAG);
 }
 
 void get_network_list() {
-   send_usard_data_from_constant(ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST);
+   send_usard_data(ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST);
    set_flag(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
 }
 
 void connect_to_network(char ssid[], char password[]) {
-   send_usard_data_from_constant(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE);
+   char *parameters[] = {ssid, password, NULL};
+   usart_data_to_be_transmitted_buffer = set_string_parameters(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE, parameters);
+   send_usard_data(usart_data_to_be_transmitted_buffer);
    set_flag(&sent_flag, CONNECT_TO_NETWORK_FLAG);
 }
 
@@ -314,30 +317,25 @@ unsigned char read_flag_state(unsigned int *flags, unsigned int flag_value) {
    return *flags & flag_value;
 }
 
-void send_usard_data_from_constant(char *string) {
+void send_usard_data(char *string) {
    clear_usart_data_received_buffer();
-
    DMA_Cmd(USART1_TX_DMA_CHANNEL, DISABLE);
-   unsigned int first_element_address = (unsigned int) string;
+   unsigned char bytes_to_send = get_string_length(string);
 
-   unsigned int bytes_to_send;
-   for (bytes_to_send = 0; *string != '\0'; string++, bytes_to_send++) {
+   if (bytes_to_send == 0) {
+      return;
    }
 
-   if (bytes_to_send > 0) {
-      DMA_SetCurrDataCounter(USART1_TX_DMA_CHANNEL, bytes_to_send);
-      USART1_TX_DMA_CHANNEL->CMAR = first_element_address;
-      USART_ClearFlag(USART1, USART_FLAG_TC);
-      DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
-   }
-}
-
-void send_usard_data_from_buffer() {
-
+   DMA_SetCurrDataCounter(USART1_TX_DMA_CHANNEL, bytes_to_send);
+   USART1_TX_DMA_CHANNEL->CMAR = (unsigned int) string;
+   USART_ClearFlag(USART1, USART_FLAG_TC);
+   DMA_Cmd(USART1_TX_DMA_CHANNEL, ENABLE);
 }
 
 /**
- * Supports only 9 parameters (1 - 9)
+ * Supports only 9 parameters (1 - 9). Do not forget to call free() function on returned pointer when it's no longer needed
+ *
+ * *parameters array of pointers to strings. The last parameter has to be NULL
  */
 void *set_string_parameters(char string[], char *parameters[]) {
    unsigned char open_brace_found = 0;
@@ -406,7 +404,9 @@ void *set_string_parameters(char string[], char *parameters[]) {
          input_string_index += 2;
 
          // Parameters are starting with 1
-         for (char *parameter = parameters[input_string_symbol - 1]; *parameter != '\0'; parameter++, result_string_index++) {
+         char *parameter = parameters[input_string_symbol - 1];
+
+         for (; *parameter != '\0'; parameter++, result_string_index++) {
             *(a + result_string_index) = *parameter;
          }
          result_string_index--;
@@ -415,7 +415,7 @@ void *set_string_parameters(char string[], char *parameters[]) {
          input_string_index++;
       }
    }
-   *(a + result_string_length) = '\n';
+   *(a + result_string_length - 1) = '\0';
    return a;
 }
 
