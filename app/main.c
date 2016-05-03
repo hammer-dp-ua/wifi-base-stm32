@@ -4,7 +4,7 @@
  * unsigned int   uint32_t
  */
 #include "stm32f0xx.h"
-//#include "arm_math.h"
+#include "arm_math.h"
 #include "stdlib.h"
 
 #define CLOCK_SPEED 16000000
@@ -14,13 +14,22 @@
 #define USART1_TDR_ADDRESS (unsigned int)(&(USART1->TDR))
 
 #define USART_DATA_RECEIVED_FLAG 1
+#define NETWORK_SEARCHING_STATUS_LED_FLAG 2
+#define SUCCESSUFULLY_CONNECTED_TO_NETWORK_FLAG 4
 
 #define GET_VISIBLE_NETWORK_LIST_FLAG 1
 #define DISABLE_ECHO_FLAG 2
 #define CONNECT_TO_NETWORK_FLAG 4
+#define CONNECTION_STATUS_FLAG 8
+#define OBTAINING_CONNECTION_STATUS_FLAG 16
 
 #define USART_DATA_RECEIVED_BUFFER_SIZE 100
 
+#define TIMER3_PERIOD_MS 0.13f
+#define TIMER3_PERIOD_S (TIMER3_PERIOD_MS / 1000)
+#define TIMER3_250MS (unsigned short)(250 / TIMER3_PERIOD_MS)
+
+unsigned int send_flag;
 unsigned int sent_flag;
 unsigned int successfully_received_flags;
 unsigned int general_flags;
@@ -31,13 +40,20 @@ char DEFAULT_ACCESS_POINT_PASSWORD[] __attribute__ ((section(".text.const"))) = 
 char ESP8226_REQUEST_DISABLE_ECHO[] __attribute__ ((section(".text.const"))) = "ATE0\r\n";
 char ESP8226_RESPONSE_BUSY[] __attribute__ ((section(".text.const"))) = "busy";
 char ESP8226_REQUEST_GET_VISIBLE_NETWORK_LIST[] __attribute__ ((section(".text.const"))) = "AT+CWLAP\r\n";
+char ESP8226_REQUEST_GET_CONNECTION_STATUS[] __attribute__ ((section(".text.const"))) = "AT+CWJAP?\r\n";
+char ESP8226_RESPONSE_NOT_CONNECTED_STATUS[] __attribute__ ((section(".text.const"))) = "No AP";
 char ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE[] __attribute__ ((section(".text.const"))) = "AT+CWJAP_DEF=\"{1}\",\"{2}\"\r\n";
 char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
 
 char *usart_data_to_be_transmitted_buffer = NULL;
 char usart_data_received_buffer[USART_DATA_RECEIVED_BUFFER_SIZE];
 volatile unsigned char usart_received_bytes;
-volatile unsigned char overrun_errors;
+
+void (*send_usart_data_function)() = NULL;
+volatile unsigned int send_usart_data_timer_counter;
+volatile unsigned short send_usart_data_timout_s = 0xFFFF;
+volatile unsigned short send_usart_data_errors_counter;
+volatile unsigned short network_searching_status_led_counter;
 
 void Clock_Config();
 void Pins_Config();
@@ -50,7 +66,9 @@ void USART_Config();
 void set_appropriate_successfully_recieved_flag();
 void disable_echo();
 void get_network_list();
-void connect_to_network(char ssid[], char password[]);
+void connect_to_network();
+void get_connection_status();
+void execute_usart_data_sending(void (*function_to_execute)(), unsigned char timeout);
 void send_usard_data(char string[]);
 unsigned char is_usart_response_contains_elements(char *data_to_be_contained[], unsigned char elements_count);
 unsigned char is_usart_response_contains_element(char string_to_be_contained[]);
@@ -70,6 +88,10 @@ void TIM3_IRQHandler() {
       usart_received_bytes = 0;
       set_flag(&general_flags, USART_DATA_RECEIVED_FLAG);
    }
+   if (send_usart_data_function != NULL) {
+      send_usart_data_timer_counter++;
+   }
+   network_searching_status_led_counter++;
 }
 
 void USART1_IRQHandler() {
@@ -80,7 +102,19 @@ void USART1_IRQHandler() {
    } else if (USART_GetFlagStatus(USART1, USART_FLAG_ORE)) {
       USART_ClearITPendingBit(USART1, USART_IT_ORE);
       USART_ClearFlag(USART1, USART_FLAG_ORE);
-      overrun_errors++;
+      send_usart_data_errors_counter++;
+   } else if (USART_GetFlagStatus(USART1, USART_FLAG_IDLE)) {
+      USART_ClearITPendingBit(USART1, USART_IT_ORE);
+      USART_ClearFlag(USART1, USART_FLAG_IDLE);
+      send_usart_data_errors_counter++;
+   } else if (USART_GetFlagStatus(USART1, USART_FLAG_NE)) {
+      USART_ClearITPendingBit(USART1, USART_IT_ORE);
+      USART_ClearFlag(USART1, USART_FLAG_NE);
+      send_usart_data_errors_counter++;
+   } else if (USART_GetFlagStatus(USART1, USART_FLAG_FE)) {
+      USART_ClearITPendingBit(USART1, USART_IT_ORE);
+      USART_ClearFlag(USART1, USART_FLAG_FE);
+      send_usart_data_errors_counter++;
    }
 }
 
@@ -91,11 +125,16 @@ int main() {
    USART_Config();
    TIMER3_Confing();
 
-   disable_echo();
+   set_flag(&send_flag, DISABLE_ECHO_FLAG);
+   set_flag(&send_flag, OBTAINING_CONNECTION_STATUS_FLAG);
 
    while (1) {
+      // Seconds
+      unsigned char send_usart_data_passed_time = (unsigned char)(TIMER3_PERIOD_S * send_usart_data_timer_counter);
+
       if (read_flag_state(&general_flags, USART_DATA_RECEIVED_FLAG)) {
          reset_flag(&general_flags, USART_DATA_RECEIVED_FLAG);
+         send_usart_data_timer_counter = 0;
 
          if (usart_data_to_be_transmitted_buffer != NULL) {
             free(usart_data_to_be_transmitted_buffer);
@@ -103,15 +142,84 @@ int main() {
          }
 
          set_appropriate_successfully_recieved_flag();
+      } else if (send_usart_data_passed_time >= send_usart_data_timout_s) {
+         send_usart_data_timer_counter = 0;
+         if (usart_data_to_be_transmitted_buffer != NULL) {
+            free(usart_data_to_be_transmitted_buffer);
+            usart_data_to_be_transmitted_buffer = NULL;
+         }
+
+         if (send_usart_data_function != NULL) {
+            send_usart_data_function();
+         }
       }
 
       if (read_flag_state(&successfully_received_flags, DISABLE_ECHO_FLAG)) {
          reset_flag(&successfully_received_flags, DISABLE_ECHO_FLAG);
+         send_usart_data_function = NULL;
+         send_usart_data_errors_counter = 0;
+         set_flag(&send_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
+      }
+      if (read_flag_state(&successfully_received_flags, OBTAINING_CONNECTION_STATUS_FLAG)) {
+         reset_flag(&successfully_received_flags, OBTAINING_CONNECTION_STATUS_FLAG);
 
-         get_network_list();
+         if (is_usart_response_contains_element(DEFAULT_ACCESS_POINT_NAME)) {
+            // Connected
+            set_flag(&general_flags, SUCCESSUFULLY_CONNECTED_TO_NETWORK_FLAG);
+            GPIO_WriteBit(GPIOA, GPIO_PinSource1, Bit_SET);
+            send_usart_data_function = NULL;
+            send_usart_data_errors_counter = 0;
+         } else if (is_usart_response_contains_element(ESP8226_RESPONSE_NOT_CONNECTED_STATUS)) {
+            // Connect
+            set_flag(&send_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
+            send_usart_data_function = NULL;
+            send_usart_data_errors_counter = 0;
+         } else {
+            send_usart_data_errors_counter++;
+         }
       }
       if (read_flag_state(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG)) {
-         connect_to_network(DEFAULT_ACCESS_POINT_NAME, DEFAULT_ACCESS_POINT_PASSWORD);
+         reset_flag(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG);
+         send_usart_data_function = NULL;
+         send_usart_data_errors_counter = 0;
+         set_flag(&send_flag, CONNECT_TO_NETWORK_FLAG);
+      }
+      if (read_flag_state(&successfully_received_flags, CONNECT_TO_NETWORK_FLAG)) {
+         reset_flag(&successfully_received_flags, CONNECT_TO_NETWORK_FLAG);
+         send_usart_data_function = NULL;
+         send_usart_data_errors_counter = 0;
+
+         set_flag(&general_flags, SUCCESSUFULLY_CONNECTED_TO_NETWORK_FLAG);
+         GPIO_WriteBit(GPIOA, GPIO_PinSource1, Bit_SET);
+      }
+
+      if (!sent_flag && send_usart_data_function == NULL) {
+         if (read_flag_state(&send_flag, DISABLE_ECHO_FLAG)) {
+            reset_flag(&send_flag, DISABLE_ECHO_FLAG);
+            execute_usart_data_sending(disable_echo, 10);
+         } else if (read_flag_state(&send_flag, OBTAINING_CONNECTION_STATUS_FLAG)) {
+            reset_flag(&send_flag, OBTAINING_CONNECTION_STATUS_FLAG);
+            execute_usart_data_sending(get_connection_status, 5);
+         } else if (read_flag_state(&send_flag, GET_VISIBLE_NETWORK_LIST_FLAG)) {
+            reset_flag(&send_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
+            execute_usart_data_sending(get_network_list, 30);
+         } else if (read_flag_state(&send_flag, CONNECT_TO_NETWORK_FLAG)) {
+            reset_flag(&send_flag, CONNECT_TO_NETWORK_FLAG);
+            execute_usart_data_sending(connect_to_network, 10);
+         }
+      }
+
+      // LED blinking
+      if (network_searching_status_led_counter >= TIMER3_250MS && !read_flag_state(&general_flags, SUCCESSUFULLY_CONNECTED_TO_NETWORK_FLAG)) {
+         network_searching_status_led_counter = 0;
+
+         if (read_flag_state(&general_flags, NETWORK_SEARCHING_STATUS_LED_FLAG)) {
+            reset_flag(&general_flags, NETWORK_SEARCHING_STATUS_LED_FLAG);
+            GPIO_WriteBit(GPIOA, GPIO_PinSource1, Bit_SET);
+         } else {
+            set_flag(&general_flags, NETWORK_SEARCHING_STATUS_LED_FLAG);
+            GPIO_WriteBit(GPIOA, GPIO_PinSource1, Bit_RESET);
+         }
       }
    }
 }
@@ -122,6 +230,8 @@ void set_appropriate_successfully_recieved_flag() {
 
       if (is_usart_response_contains_element(USART_OK)) {
          set_flag(&successfully_received_flags, DISABLE_ECHO_FLAG);
+      } else {
+         send_usart_data_errors_counter++;
       }
    }
    if (read_flag_state(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG)) {
@@ -129,7 +239,22 @@ void set_appropriate_successfully_recieved_flag() {
 
       if (is_usart_response_contains_element(DEFAULT_ACCESS_POINT_NAME)) {
          set_flag(&successfully_received_flags, GET_VISIBLE_NETWORK_LIST_FLAG);
+      } else {
+         send_usart_data_errors_counter++;
       }
+   }
+   if (read_flag_state(&sent_flag, CONNECT_TO_NETWORK_FLAG)) {
+      reset_flag(&sent_flag, CONNECT_TO_NETWORK_FLAG);
+
+      if (is_usart_response_contains_element(USART_OK)) {
+         set_flag(&successfully_received_flags, CONNECT_TO_NETWORK_FLAG);
+      } else {
+         send_usart_data_errors_counter++;
+      }
+   }
+   if (read_flag_state(&sent_flag, OBTAINING_CONNECTION_STATUS_FLAG)) {
+      reset_flag(&sent_flag, OBTAINING_CONNECTION_STATUS_FLAG);
+      set_flag(&successfully_received_flags, OBTAINING_CONNECTION_STATUS_FLAG);
    }
 }
 
@@ -192,11 +317,22 @@ void get_network_list() {
    set_flag(&sent_flag, GET_VISIBLE_NETWORK_LIST_FLAG);
 }
 
-void connect_to_network(char ssid[], char password[]) {
-   char *parameters[] = {ssid, password, NULL};
+void get_connection_status() {
+   send_usard_data(ESP8226_REQUEST_GET_CONNECTION_STATUS);
+   set_flag(&sent_flag, OBTAINING_CONNECTION_STATUS_FLAG);
+}
+
+void connect_to_network() {
+   char *parameters[] = {DEFAULT_ACCESS_POINT_NAME, DEFAULT_ACCESS_POINT_PASSWORD, NULL};
    usart_data_to_be_transmitted_buffer = set_string_parameters(ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE, parameters);
    send_usard_data(usart_data_to_be_transmitted_buffer);
    set_flag(&sent_flag, CONNECT_TO_NETWORK_FLAG);
+}
+
+void execute_usart_data_sending(void (*function_to_execute)(), unsigned char timeout) {
+   send_usart_data_timout_s = timeout;
+   send_usart_data_function = function_to_execute;
+   function_to_execute();
 }
 
 void Clock_Config() {
@@ -216,7 +352,7 @@ void Pins_Config() {
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA | RCC_AHBPeriph_GPIOB, ENABLE);
 
    GPIO_InitTypeDef gpioInitType;
-   gpioInitType.GPIO_Pin = 0x99FF; // Pins 0 - 8, 11, 12, 15. PA13, PA14 - Debugger pins
+   gpioInitType.GPIO_Pin = 0x99FD; // Pins PA0, 2 - 8, 11, 12, 15. PA13, PA14 - Debugger pins
    gpioInitType.GPIO_Mode = GPIO_Mode_IN;
    gpioInitType.GPIO_Speed = GPIO_Speed_Level_2; // 10 MHz
    gpioInitType.GPIO_PuPd = GPIO_PuPd_UP;
@@ -236,6 +372,14 @@ void Pins_Config() {
    gpioInitType.GPIO_Mode = GPIO_Mode_IN;
    gpioInitType.GPIO_PuPd = GPIO_PuPd_UP;
    GPIO_Init(GPIOB, &gpioInitType);
+
+   // PA1 LED
+   gpioInitType.GPIO_Pin = GPIO_PinSource1;
+   gpioInitType.GPIO_Mode = GPIO_Mode_OUT;
+   gpioInitType.GPIO_Speed = GPIO_Speed_Level_1;
+   gpioInitType.GPIO_PuPd = GPIO_PuPd_NOPULL;
+   gpioInitType.GPIO_OType = GPIO_OType_PP;
+   GPIO_Init(GPIOA, &gpioInitType);
 }
 
 /**
