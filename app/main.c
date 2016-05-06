@@ -22,6 +22,7 @@
 #define CONNECT_TO_NETWORK_FLAG 4
 #define CONNECTION_STATUS_FLAG 8
 #define OBTAIN_CONNECTION_STATUS_FLAG 16
+#define SERVER_PING_OK_STATUS_FLAG 32
 
 #define USART_DATA_RECEIVED_BUFFER_SIZE 100
 
@@ -35,6 +36,7 @@ unsigned int successfully_received_flags;
 unsigned int general_flags;
 
 char USART_OK[] __attribute__ ((section(".text.const"))) = "OK";
+char USART_ERROR[] __attribute__ ((section(".text.const"))) = "ERROR";
 char DEFAULT_ACCESS_POINT_NAME[] __attribute__ ((section(".text.const"))) = "Asus";
 char DEFAULT_ACCESS_POINT_PASSWORD[] __attribute__ ((section(".text.const"))) = "";
 char ESP8226_REQUEST_DISABLE_ECHO[] __attribute__ ((section(".text.const"))) = "ATE0\r\n";
@@ -44,6 +46,15 @@ char ESP8226_REQUEST_GET_CONNECTION_STATUS[] __attribute__ ((section(".text.cons
 char ESP8226_RESPONSE_NOT_CONNECTED_STATUS[] __attribute__ ((section(".text.const"))) = "No AP";
 char ESP8226_REQUEST_CONNECT_TO_NETWORK_AND_SAVE[] __attribute__ ((section(".text.const"))) = "AT+CWJAP_DEF=\"{1}\",\"{2}\"\r\n";
 char ESP8226_REQUEST_GET_VERSION_ID[] __attribute__ ((section(".text.const"))) = "AT+GMR\r\n";
+char ESP8226_RESPONSE_CONNECTED[] __attribute__ ((section(".text.const"))) = "CONNECT";
+char ESP8226_CONNECTION_CLOSED[] __attribute__ ((section(".text.const"))) = "CLOSED";
+char ESP8226_REQUEST_CONNECT_TO_SERVER[] __attribute__ ((section(".text.const"))) = "AT+CIPSTART=\"TCP\",\"192.168.0.2\",7550\r\n";
+char ESP8226_REQUEST_SERVER_PING[] __attribute__ ((section(".text.const"))) = "AT+PING=\"192.168.0.2\"\r\n";
+char ESP8226_REQUEST_START_SENDING[] __attribute__ ((section(".text.const"))) = "AT+CIPSEND={1}\r\n";
+char ESP8226_RESPONSE_START_SENDING_READY[] __attribute__ ((section(".text.const"))) = ">";
+char ESP8226_RESPONSE_SENDING[] __attribute__ ((section(".text.const"))) = "busy s...";
+char ESP8226_RESPONSE_SUCCSESSFULLY_SENT[] __attribute__ ((section(".text.const"))) = "SEND OK";
+char ESP8226_RESPONSE_ALREADY_CONNECTED[] __attribute__ ((section(".text.const"))) = "ALREADY CONNECTED";
 
 char *usart_data_to_be_transmitted_buffer = NULL;
 char usart_data_received_buffer[USART_DATA_RECEIVED_BUFFER_SIZE];
@@ -129,8 +140,9 @@ int main() {
    USART_Config();
    TIMER3_Confing();
 
-   piped_tasks_to_send[0] = DISABLE_ECHO_FLAG;
-   piped_tasks_to_send[1] = OBTAIN_CONNECTION_STATUS_FLAG;
+   add_piped_task_to_send(DISABLE_ECHO_FLAG);
+   add_piped_task_to_send(OBTAIN_CONNECTION_STATUS_FLAG);
+   add_piped_task_to_send(SERVER_PING_OK_STATUS_FLAG);
 
    while (1) {
       // Seconds
@@ -165,7 +177,7 @@ int main() {
          reset_flag(&successfully_received_flags, OBTAIN_CONNECTION_STATUS_FLAG);
 
          if (is_usart_response_contains_element(DEFAULT_ACCESS_POINT_NAME)) {
-            // Connected
+            // Has already been connected
             set_flag(&general_flags, SUCCESSUFULLY_CONNECTED_TO_NETWORK_FLAG);
             GPIO_WriteBit(GPIOA, GPIO_Pin_1, Bit_SET);
             on_successfully_receive_general_actions(0);
@@ -190,7 +202,7 @@ int main() {
 
       unsigned short current_piped_task_to_send = get_current_piped_task_to_send();
 
-      if (send_usart_data_function == NULL && current_piped_task_to_send != 0) {
+      if (send_usart_data_function == NULL && current_piped_task_to_send) {
          if (current_piped_task_to_send == DISABLE_ECHO_FLAG) {
             execute_usart_data_sending(disable_echo, 10);
          } else if (current_piped_task_to_send == OBTAIN_CONNECTION_STATUS_FLAG) {
@@ -199,6 +211,8 @@ int main() {
             execute_usart_data_sending(get_network_list, 30);
          } else if (current_piped_task_to_send == CONNECT_TO_NETWORK_FLAG) {
             execute_usart_data_sending(connect_to_network, 10);
+         } else if (current_piped_task_to_send == SERVER_PING_OK_STATUS_FLAG) {
+
          }
       }
 
@@ -213,35 +227,6 @@ int main() {
             set_flag(&general_flags, NETWORK_SEARCHING_STATUS_LED_FLAG);
             GPIO_WriteBit(GPIOA, GPIO_Pin_1, Bit_RESET);
          }
-      }
-   }
-}
-
-void on_successfully_receive_general_actions(unsigned short successfully_received_flag) {
-   if (successfully_received_flag) {
-      reset_flag(&successfully_received_flags, successfully_received_flag);
-   }
-   send_usart_data_function = NULL;
-   send_usart_data_errors_counter = 0;
-   remove_current_piped_task_to_send();
-}
-
-unsigned short get_current_piped_task_to_send() {
-   return piped_tasks_to_send[0];
-}
-
-void remove_current_piped_task_to_send() {
-   for (unsigned char i = 0; piped_tasks_to_send[i] != 0; i++) {
-      unsigned short next_task = piped_tasks_to_send[i + 1];
-      piped_tasks_to_send[i] = next_task;
-   }
-}
-
-void add_piped_task_to_send(unsigned short task) {
-   for (unsigned char i = 0; i < 10; i++) {
-      if (piped_tasks_to_send[i] == 0) {
-         piped_tasks_to_send[i] = task;
-         break;
       }
    }
 }
@@ -277,6 +262,35 @@ void set_appropriate_successfully_recieved_flag() {
    if (read_flag_state(&sent_flag, OBTAIN_CONNECTION_STATUS_FLAG)) {
       reset_flag(&sent_flag, OBTAIN_CONNECTION_STATUS_FLAG);
       set_flag(&successfully_received_flags, OBTAIN_CONNECTION_STATUS_FLAG);
+   }
+}
+
+void on_successfully_receive_general_actions(unsigned short successfully_received_flag) {
+   if (successfully_received_flag) {
+      reset_flag(&successfully_received_flags, successfully_received_flag);
+   }
+   send_usart_data_function = NULL;
+   send_usart_data_errors_counter = 0;
+   remove_current_piped_task_to_send();
+}
+
+unsigned short get_current_piped_task_to_send() {
+   return piped_tasks_to_send[0];
+}
+
+void remove_current_piped_task_to_send() {
+   for (unsigned char i = 0; piped_tasks_to_send[i] != 0; i++) {
+      unsigned short next_task = piped_tasks_to_send[i + 1];
+      piped_tasks_to_send[i] = next_task;
+   }
+}
+
+void add_piped_task_to_send(unsigned short task) {
+   for (unsigned char i = 0; i < 10; i++) {
+      if (piped_tasks_to_send[i] == 0) {
+         piped_tasks_to_send[i] = task;
+         break;
+      }
    }
 }
 
@@ -374,7 +388,7 @@ void Pins_Config() {
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA | RCC_AHBPeriph_GPIOB, ENABLE);
 
    GPIO_InitTypeDef gpioInitType;
-   gpioInitType.GPIO_Pin = 0x99FD; // Pins PA0, 2 - 8, 11, 12, 15. PA13, PA14 - Debugger pins
+   gpioInitType.GPIO_Pin = 0x99F9; // Pins PA0, 3 - 8, 11, 12, 15. PA13, PA14 - Debugger pins
    gpioInitType.GPIO_Mode = GPIO_Mode_IN;
    gpioInitType.GPIO_Speed = GPIO_Speed_Level_2; // 10 MHz
    gpioInitType.GPIO_PuPd = GPIO_PuPd_UP;
@@ -401,6 +415,10 @@ void Pins_Config() {
    gpioInitType.GPIO_Speed = GPIO_Speed_Level_1;
    gpioInitType.GPIO_PuPd = GPIO_PuPd_DOWN;
    gpioInitType.GPIO_OType = GPIO_OType_PP;
+   GPIO_Init(GPIOA, &gpioInitType);
+
+   // PA2 LED
+   gpioInitType.GPIO_Pin = GPIO_Pin_2;
    GPIO_Init(GPIOA, &gpioInitType);
 }
 
